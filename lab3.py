@@ -2,7 +2,7 @@ import math
 import sys
 import pickle
 
-MAX_TREE_DEPTH = 4
+MAX_TREE_DEPTH = 10
 NUM_STUMPS = 10
 
 
@@ -128,6 +128,23 @@ def solve(example, dt, features) -> str:
     return solve(example, dt.right_child, features)
 
 
+def calc_right():
+    test = []
+    for line in open("test.txt", 'r', encoding="utf8"):
+        test.append(line.split("|")[0])
+    
+    out = []
+    for line in open("predict.out", 'r',  encoding="utf8"):
+        out.append(line.strip())
+
+    right = 0
+    for i in range(len(test)):
+        if test[i] == out[i]:
+            right += 1
+
+    print(right/len(test))
+
+
 def predict(examples_file, features_file, hypothesis_file):
 
     examples = []
@@ -145,6 +162,8 @@ def predict(examples_file, features_file, hypothesis_file):
         solved = solve(example, trained_dt, features)
         file.write(solved+"\n")
         #print(solved)
+    file.close()
+    calc_right()
 
 
 if __name__ == "__main__":
