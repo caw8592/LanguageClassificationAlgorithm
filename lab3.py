@@ -2,14 +2,15 @@ import math
 import sys
 import pickle
 
-MAX_TREE_DEPTH = 10
-NUM_STUMPS = 10
+MAX_TREE_DEPTH = 5
+NUM_STUMPS = 50
 
 
 class Data:
-    def __init__(self, answer, words):
+    def __init__(self, answer, string, weight):
         self.answer = answer
-        self.string = words
+        self.string = string
+        self.weight = weight
 
 
 class Tree:
@@ -20,10 +21,22 @@ class Tree:
         self.right_child = None
 
 
+class WeightedHypothesis:
+    def __init__(self, dt, weight):
+        self.dt = dt
+        self.weight = weight
+    
+
+class Hypothesis:
+    def __init__(self, type, hypothesis):
+        self.type = type
+        self.hypothesis = hypothesis
+
 def print_tree(tree) -> str:
     if tree.left_child == None:
         return ""
     return f"{tree.data} [{print_tree(tree.left_child)}] [{print_tree(tree.right_child)}]"
+
 
 def find_entropy(examples):
     if(len(examples) == 1 or len(examples) == 0) :
@@ -33,9 +46,9 @@ def find_entropy(examples):
     num_nl = 0
     for example in examples:
         if example.answer == "en":
-            num_en += 1
+            num_en += example.weight
         else:
-            num_nl += 1
+            num_nl += example.weight
 
     probability_en = num_en/len(examples)
     probability_nl = num_nl/len(examples)
@@ -44,6 +57,7 @@ def find_entropy(examples):
         return 0
 
     return -(probability_nl*math.log(probability_nl, 2) + probability_en*math.log(probability_en, 2))
+
 
 # returns the root of a tree
 def decision_tree(examples, features, curr_depth = 0):
@@ -93,17 +107,53 @@ def decision_tree(examples, features, curr_depth = 0):
     return this_node
 
 
+def normalize_weights(examples: list[Data]) -> list[Data]:
+    total_weights = 0
+    for example in examples:
+        total_weights += example.weight
+    for example in examples:
+        example.weight = example.weight/total_weights
+    return examples
+
+
+def ada_solve(example, dt, features) -> str:
+    if dt.left_child == None and dt.right_child == None:
+        return dt.choice
+    if(features[dt.data] in example.string):
+        return ada_solve(example, dt.left_child, features)
+    return ada_solve(example, dt.right_child, features)
+
+
 # return type to be decided
-def ada_boost(examples, features):
-    return
+def ada_boost(examples: list[Data], features: list[str]):
+    H: list[Data] = []
+    for i in range(1, NUM_STUMPS+1):
+        h = decision_tree(examples, features)
+        err = 0
+        for example in examples:
+            if ada_solve(example, h, features) != example.answer:
+                err += example.weight
+        DW = err/(1-err)
+        for example in examples:
+            if ada_solve(example, h, features) == example.answer:
+                example.weight *= DW
+        examples = normalize_weights(examples)
+        H.append(WeightedHypothesis(h, (.5*math.log((1-err)/err, 2))))
+    return H
+
         
 
 def train(examples_file, features_file, hypothesis_out_file, learning_type):
-    
     examples = []
-    for line in open(examples_file, 'r', encoding="utf8"):
+    file = open(examples_file, 'r', encoding="utf8")
+    lines = file.readlines()
+    for line in lines:
         data_list = line.split("|")
-        examples.append(Data(data_list[0], data_list[1].split(" ")))
+        if learning_type == 'ada':
+            examples.append(Data(data_list[0], data_list[1].split(" "), 1/len(lines)))
+        else:
+            examples.append(Data(data_list[0], data_list[1].split(" "), 1))
+    
     
     features = []
     for line in open(features_file, 'r', encoding="utf8"):
@@ -111,9 +161,9 @@ def train(examples_file, features_file, hypothesis_out_file, learning_type):
 
     match learning_type:
         case "dt":
-            hypothesis = decision_tree(examples, features)
+            hypothesis = Hypothesis("dt", decision_tree(examples, features))
         case "ada":
-            hypothesis = ada_boost(examples, features)
+            hypothesis = Hypothesis("ada", ada_boost(examples, features))
         case _:
             print("Unknown Learning Type")
 
@@ -155,13 +205,26 @@ def predict(examples_file, features_file, hypothesis_file):
     for line in open(features_file, 'r', encoding="utf8"):
         features.append(line.strip())
 
-    trained_dt = pickle.load(open(hypothesis_file, 'rb'))
+    hypothesis = pickle.load(open(hypothesis_file, 'rb'))
 
     file = open("predict.out", 'w')
-    for example in examples:
-        solved = solve(example, trained_dt, features)
-        file.write(solved+"\n")
-        #print(solved)
+    match hypothesis.type:
+        case "dt":
+            for example in examples:
+                solved = solve(example, hypothesis.hypothesis, features)
+                file.write(solved+"\n")
+                #print(solved)
+        case "ada":
+            for example in examples:
+                weight_en = 0
+                weight_nl = 0
+                for hyp in hypothesis.hypothesis:
+                    if(solve(example, hyp.dt, features) == "en"):
+                        weight_en += hyp.weight
+                    else:
+                        weight_nl += hyp.weight
+                file.write("en\n" if weight_en >= weight_nl else "nl\n")
+                #print("en" if weight_en >= weight_nl else "nl")
     file.close()
     calc_right()
 
