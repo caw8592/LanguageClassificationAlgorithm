@@ -2,8 +2,8 @@ import math
 import sys
 import pickle
 
-MAX_TREE_DEPTH = 5
-NUM_STUMPS = 50
+MAX_TREE_DEPTH = 11
+NUM_STUMPS = 10
 
 
 class Data:
@@ -42,16 +42,18 @@ def find_entropy(examples):
     if(len(examples) == 1 or len(examples) == 0) :
         return 0
 
-    num_en = 0
-    num_nl = 0
+    weight_en = 0
+    weight_nl = 0
+    weight_total = 0
     for example in examples:
         if example.answer == "en":
-            num_en += example.weight
+            weight_en += example.weight
         else:
-            num_nl += example.weight
+            weight_nl += example.weight
+        weight_total += example.weight
 
-    probability_en = num_en/len(examples)
-    probability_nl = num_nl/len(examples)
+    probability_en = weight_en/weight_total
+    probability_nl = weight_nl/weight_total
 
     if probability_en == 0 or probability_nl == 0:
         return 0
@@ -67,6 +69,16 @@ def decision_tree(examples, features, curr_depth = 0):
         return None
     if len(examples) == 0:
         return None
+    
+    # figure out if all options are the same
+    answer = examples[0].answer
+    all_same = True
+    for ex in examples:
+        if ex.answer != answer:
+            all_same = False
+            break
+    if(all_same):
+        return Tree(-1, answer)
     
     best_entropy = 0
     best_idx = 0
@@ -127,7 +139,7 @@ def ada_solve(example, dt, features) -> str:
 # return type to be decided
 def ada_boost(examples: list[Data], features: list[str]):
     H: list[Data] = []
-    for i in range(1, NUM_STUMPS+1):
+    for i in range(NUM_STUMPS):
         h = decision_tree(examples, features)
         err = 0
         for example in examples:
@@ -136,12 +148,11 @@ def ada_boost(examples: list[Data], features: list[str]):
         DW = err/(1-err)
         for example in examples:
             if ada_solve(example, h, features) == example.answer:
-                example.weight *= DW
+                example.weight = example.weight*DW
         examples = normalize_weights(examples)
-        H.append(WeightedHypothesis(h, (.5*math.log((1-err)/err, 2))))
+        H.append(WeightedHypothesis(h, (.5*math.log((1-err)/err))))
     return H
-
-        
+     
 
 def train(examples_file, features_file, hypothesis_out_file, learning_type):
     examples = []
@@ -207,13 +218,13 @@ def predict(examples_file, features_file, hypothesis_file):
 
     hypothesis = pickle.load(open(hypothesis_file, 'rb'))
 
-    file = open("predict.out", 'w')
+    #file = open("predict.out", 'w')
     match hypothesis.type:
         case "dt":
             for example in examples:
                 solved = solve(example, hypothesis.hypothesis, features)
-                file.write(solved+"\n")
-                #print(solved)
+                #file.write(solved+"\n")
+                print(solved)
         case "ada":
             for example in examples:
                 weight_en = 0
@@ -223,10 +234,10 @@ def predict(examples_file, features_file, hypothesis_file):
                         weight_en += hyp.weight
                     else:
                         weight_nl += hyp.weight
-                file.write("en\n" if weight_en >= weight_nl else "nl\n")
-                #print("en" if weight_en >= weight_nl else "nl")
-    file.close()
-    calc_right()
+                #file.write("en\n" if weight_en >= weight_nl else "nl\n")
+                print("en" if weight_en >= weight_nl else "nl")
+    #file.close()
+    #calc_right()
 
 
 if __name__ == "__main__":
