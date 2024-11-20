@@ -2,8 +2,9 @@ import math
 import sys
 import pickle
 
-MAX_TREE_DEPTH = 2
+MAX_TREE_DEPTH = 19
 NUM_STUMPS = 10
+STUMP_DEPTH = 2
 
 
 class Data:
@@ -62,7 +63,7 @@ def find_entropy(examples):
 
 
 # returns the root of a tree
-def decision_tree(examples, features, curr_depth = 0):
+def decision_tree(examples, features, curr_depth = MAX_TREE_DEPTH):
     if curr_depth > MAX_TREE_DEPTH:
         return None
     if curr_depth == len(features):
@@ -140,7 +141,7 @@ def ada_solve(example, dt, features) -> str:
 def ada_boost(examples: list[Data], features: list[str]):
     H: list[Data] = []
     for i in range(NUM_STUMPS):
-        h = decision_tree(examples, features)
+        h = decision_tree(examples, features, STUMP_DEPTH)
         err = 0
         for example in examples:
             if ada_solve(example, h, features) != example.answer:
@@ -218,13 +219,13 @@ def predict(examples_file, features_file, hypothesis_file):
 
     hypothesis = pickle.load(open(hypothesis_file, 'rb'))
 
-    #file = open("predict.out", 'w')
+    file = open("predict.out", 'w')
     match hypothesis.type:
         case "dt":
             for example in examples:
                 solved = solve(example, hypothesis.hypothesis, features)
-                #file.write(solved+"\n")
-                print(solved)
+                file.write(solved+"\n")
+                #print(solved)
         case "ada":
             for example in examples:
                 weight_en = 0
@@ -234,10 +235,10 @@ def predict(examples_file, features_file, hypothesis_file):
                         weight_en += hyp.weight
                     else:
                         weight_nl += hyp.weight
-                #file.write("en\n" if weight_en >= weight_nl else "nl\n")
-                print("en" if weight_en >= weight_nl else "nl")
-    #file.close()
-    #calc_right()
+                file.write("en\n" if weight_en >= weight_nl else "nl\n")
+                #print("en" if weight_en >= weight_nl else "nl")
+    file.close()
+    calc_right()
 
 
 if __name__ == "__main__":
