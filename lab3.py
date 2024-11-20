@@ -2,7 +2,7 @@ import math
 import sys
 import pickle
 
-MAX_TREE_DEPTH = 19
+MAX_TREE_DEPTH = 2
 NUM_STUMPS = 10
 
 
