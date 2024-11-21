@@ -4,7 +4,7 @@ import pickle
 
 MAX_TREE_DEPTH = 19
 NUM_STUMPS = 10
-STUMP_DEPTH = 2
+STUMP_DEPTH = 1
 
 
 class Data:
@@ -33,54 +33,42 @@ class Hypothesis:
         self.type = type
         self.hypothesis = hypothesis
 
-def print_tree(tree) -> str:
-    if tree.left_child == None:
-        return ""
-    return f"{tree.data} [{print_tree(tree.left_child)}] [{print_tree(tree.right_child)}]"
 
-
-def find_entropy(examples):
+def find_B(examples):
     if(len(examples) == 1 or len(examples) == 0) :
         return 0
 
     weight_en = 0
-    weight_nl = 0
     weight_total = 0
     for example in examples:
         if example.answer == "en":
             weight_en += example.weight
-        else:
-            weight_nl += example.weight
         weight_total += example.weight
 
     probability_en = weight_en/weight_total
-    probability_nl = weight_nl/weight_total
 
-    if probability_en == 0 or probability_nl == 0:
+    if probability_en == 0 or probability_en == 1:
         return 0
-
-    return -(probability_nl*math.log(probability_nl, 2) + probability_en*math.log(probability_en, 2))
-
-
-# returns the root of a tree
-def decision_tree(examples, features, curr_depth = MAX_TREE_DEPTH):
-    if curr_depth > MAX_TREE_DEPTH:
-        return None
-    if curr_depth == len(features):
-        return None
-    if len(examples) == 0:
-        return None
     
-    # figure out if all options are the same
-    answer = examples[0].answer
-    all_same = True
-    for ex in examples:
-        if ex.answer != answer:
-            all_same = False
-            break
-    if(all_same):
-        return Tree(-1, answer)
-    
+    return probability_en*math.log((1/probability_en),2) + (1-probability_en)*math.log(1/(1-probability_en), 2)
+
+
+def get_lst_weight(examples):
+    total = 0
+    for example in examples:
+        total += example.weight
+    return total
+
+
+def find_remainder(examples, has, hasnt):
+    examples_weight = get_lst_weight(examples)
+    rem_has = (get_lst_weight(has)/examples_weight)*find_B(has)
+    rem_hasnt = (get_lst_weight(hasnt)/examples_weight)*find_B(hasnt)
+
+    return rem_has + rem_hasnt
+
+
+def argemax(examples, features):
     best_entropy = 0
     best_idx = 0
     best_has = []
@@ -93,31 +81,67 @@ def decision_tree(examples, features, curr_depth = MAX_TREE_DEPTH):
                 has.append(example)
             else:
                 hasnt.append(example)
-
-        has_entropy = (len(has)/len(examples)) * find_entropy(has)
-        hasnt_entropy = (len(hasnt)/len(examples)) * find_entropy(hasnt)
-        entropy = find_entropy(examples) - (has_entropy + hasnt_entropy)
+        
+        entropy = find_B(examples) - find_remainder(examples, has, hasnt)
 
         if entropy > best_entropy:
             best_entropy = entropy
             best_idx = i
             best_has = has
             best_hasnt = hasnt
+        if best_entropy == 0:
+            best_idx = i
+            best_has = has
+            best_hasnt = hasnt
 
-    is_en = 0
-    is_nl = 0
+    return best_idx, best_has, best_hasnt
+
+
+def Majority_Answer(examples):
+    num_en = 0
+    num_nl = 0
     for example in examples:
         if example.answer == "en":
-            is_en += 1
+            num_en += 1
         else:
-            is_nl += 1
+            num_nl += 1
+    return "en" if num_en > num_nl else "nl"
 
-    this_node = Tree(best_idx, "en" if is_en >= is_nl else "nl")
-    this_node.left_child = decision_tree(best_has, features, curr_depth+1)
-    this_node.right_child = decision_tree(best_hasnt, features, curr_depth+1)
+
+def is_Same_Classification(examples):
+    classification = examples[0].answer
+    for example in examples:
+        if example.answer != classification:
+            return False
+    return True
+
+
+# returns the root of a tree
+def decision_tree(examples, features, curr_depth = 0, max_depth = MAX_TREE_DEPTH):
+    if len(examples) == 0:
+        return 1
+    majority_answer = Majority_Answer(examples)
+    if is_Same_Classification(examples):
+        return Tree(-1, majority_answer)
+    if len(features) == curr_depth:
+        return Tree(-1, majority_answer)
+    if curr_depth == max_depth:
+        return Tree(-1, majority_answer)
     
+    A, has, hasnt = argemax(examples, features)
     
-    return this_node
+    node = Tree(A, majority_answer)
+    dt_left_child = decision_tree(has, features, curr_depth+1, max_depth)
+    if dt_left_child == 1:
+        dt_left_child = Tree(-1, majority_answer)
+    node.left_child = dt_left_child
+
+    dt_right_child = decision_tree(hasnt, features, curr_depth+1, max_depth)
+    if dt_right_child == 1:
+        dt_right_child = Tree(-1, majority_answer)
+    node.right_child = dt_right_child
+
+    return node
 
 
 def normalize_weights(examples: list[Data]) -> list[Data]:
@@ -130,7 +154,7 @@ def normalize_weights(examples: list[Data]) -> list[Data]:
 
 
 def ada_solve(example, dt, features) -> str:
-    if dt.left_child == None and dt.right_child == None:
+    if dt.data == -1:
         return dt.choice
     if(features[dt.data] in example.string):
         return ada_solve(example, dt.left_child, features)
@@ -141,17 +165,22 @@ def ada_solve(example, dt, features) -> str:
 def ada_boost(examples: list[Data], features: list[str]):
     H: list[Data] = []
     for i in range(NUM_STUMPS):
-        h = decision_tree(examples, features, STUMP_DEPTH)
+        h = decision_tree(examples, features, 0,  STUMP_DEPTH)
         err = 0
         for example in examples:
             if ada_solve(example, h, features) != example.answer:
                 err += example.weight
         DW = err/(1-err)
+        if DW == 0:
+            DW = 1
         for example in examples:
             if ada_solve(example, h, features) == example.answer:
                 example.weight = example.weight*DW
         examples = normalize_weights(examples)
-        H.append(WeightedHypothesis(h, (.5*math.log((1-err)/err))))
+        if err == 0:
+            H.append(WeightedHypothesis(h, 1))
+        else:
+            H.append(WeightedHypothesis(h, (.5*math.log((1-err)/err))))
     return H
      
 
@@ -162,9 +191,9 @@ def train(examples_file, features_file, hypothesis_out_file, learning_type):
     for line in lines:
         data_list = line.split("|")
         if learning_type == 'ada':
-            examples.append(Data(data_list[0], data_list[1].split(" "), 1/len(lines)))
+            examples.append(Data(data_list[0], data_list[1].strip(), 1/len(lines)))
         else:
-            examples.append(Data(data_list[0], data_list[1].split(" "), 1))
+            examples.append(Data(data_list[0], data_list[1].strip(), 1))
     
     
     features = []
@@ -183,28 +212,11 @@ def train(examples_file, features_file, hypothesis_out_file, learning_type):
 
 
 def solve(example, dt, features) -> str:
-    if dt.left_child == None and dt.right_child == None:
+    if dt.data == -1:
         return dt.choice
-    if(features[dt.data] in example):
+    if features[dt.data] in example:
         return solve(example, dt.left_child, features)
     return solve(example, dt.right_child, features)
-
-
-def calc_right():
-    test = []
-    for line in open("test.txt", 'r', encoding="utf8"):
-        test.append(line.split("|")[0])
-    
-    out = []
-    for line in open("predict.out", 'r',  encoding="utf8"):
-        out.append(line.strip())
-
-    right = 0
-    for i in range(len(test)):
-        if test[i] == out[i]:
-            right += 1
-
-    print(right/len(test))
 
 
 def predict(examples_file, features_file, hypothesis_file):
@@ -219,13 +231,11 @@ def predict(examples_file, features_file, hypothesis_file):
 
     hypothesis = pickle.load(open(hypothesis_file, 'rb'))
 
-    file = open("predict.out", 'w')
     match hypothesis.type:
         case "dt":
             for example in examples:
                 solved = solve(example, hypothesis.hypothesis, features)
-                file.write(solved+"\n")
-                #print(solved)
+                print(solved)
         case "ada":
             for example in examples:
                 weight_en = 0
@@ -235,10 +245,7 @@ def predict(examples_file, features_file, hypothesis_file):
                         weight_en += hyp.weight
                     else:
                         weight_nl += hyp.weight
-                file.write("en\n" if weight_en >= weight_nl else "nl\n")
-                #print("en" if weight_en >= weight_nl else "nl")
-    file.close()
-    calc_right()
+                print("en" if weight_en >= weight_nl else "nl")
 
 
 if __name__ == "__main__":
